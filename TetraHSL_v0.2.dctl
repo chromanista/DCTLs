@@ -1,0 +1,190 @@
+/* 
+ * Tetra HSL
+ * Copyright (C) 2024 - Chromanista
+ * Version - 0.2 - 2024-10-04
+*/
+
+DEFINE_UI_PARAMS(redH, Red Hue, DCTLUI_SLIDER_FLOAT, 0, -1, 1, 0.01)
+DEFINE_UI_PARAMS(redS, Red Satch, DCTLUI_SLIDER_FLOAT, 0, -1, 1, 0.01)
+DEFINE_UI_PARAMS(redL, Red Lightness, DCTLUI_SLIDER_FLOAT, 0, -1, 1, 0.01)
+
+DEFINE_UI_PARAMS(grnH, Green Hue, DCTLUI_SLIDER_FLOAT, 0, -1, 1, 0.01)
+DEFINE_UI_PARAMS(grnS, Green Satch, DCTLUI_SLIDER_FLOAT, 0, -1, 1, 0.01)
+DEFINE_UI_PARAMS(grnL, Green Lightness, DCTLUI_SLIDER_FLOAT, 0, -1, 1, 0.01)
+
+DEFINE_UI_PARAMS(bluH, Blue Hue, DCTLUI_SLIDER_FLOAT, 0, -1, 1, 0.01)
+DEFINE_UI_PARAMS(bluS, Blue Satch, DCTLUI_SLIDER_FLOAT, 0, -1, 1, 0.01)
+DEFINE_UI_PARAMS(bluL, Blue Lightness, DCTLUI_SLIDER_FLOAT, 0, -1, 1, 0.01)
+
+DEFINE_UI_PARAMS(cynH, Cyan Hue, DCTLUI_SLIDER_FLOAT, 0, -1, 1, 0.01)
+DEFINE_UI_PARAMS(cynS, Cyan Satch, DCTLUI_SLIDER_FLOAT, 0, -1, 1, 0.01)
+DEFINE_UI_PARAMS(cynL, Cyan Lightness, DCTLUI_SLIDER_FLOAT, 0, -1, 1, 0.01)
+
+DEFINE_UI_PARAMS(magH, Magenta Hue, DCTLUI_SLIDER_FLOAT, 0, -1, 1, 0.01)
+DEFINE_UI_PARAMS(magS, Magenta Satch, DCTLUI_SLIDER_FLOAT, 0, -1, 1, 0.01)
+DEFINE_UI_PARAMS(magL, Magenta Lightness, DCTLUI_SLIDER_FLOAT, 0, -1, 1, 0.01)
+
+DEFINE_UI_PARAMS(yelH, Yellow Hue, DCTLUI_SLIDER_FLOAT, 0, -1, 1, 0.01)
+DEFINE_UI_PARAMS(yelS, Yellow Satch, DCTLUI_SLIDER_FLOAT, 0, -1, 1, 0.01)
+DEFINE_UI_PARAMS(yelL, Yellow Lightness, DCTLUI_SLIDER_FLOAT, 0, -1, 1, 0.01)
+
+
+__DEVICE__ float better_atan(float x, float y)
+{
+	return _atan2f( x, y );
+}
+
+__DEVICE__ float det3x3(float mat[9])
+{
+	return mat[0] * ( mat[4] * mat[8] - mat[5] * mat[7] ) 
+		- mat[1] * ( mat[3] * mat[8] - mat[5] * mat[6] )
+		+ - mat[2] * ( mat[3] * mat[7] - mat[4] * mat[6] );
+}
+
+__DEVICE__ float3 apply_3x3_matrix(float3 triplet, float matrix[9])
+{
+	float3 result;
+	result.x = matrix[0] * triplet.x + matrix[1] * triplet.y + matrix[2] * triplet.z;
+	result.y = matrix[3] * triplet.x + matrix[4] * triplet.y + matrix[5] * triplet.z;
+	result.z = matrix[6] * triplet.x + matrix[7] * triplet.y + matrix[8] * triplet.z;
+	return result;
+}
+
+__DEVICE__ void invert_3x3_matrix( float mat[9], float result[9])
+{	
+	float d = det3x3(mat) * 3.0f; 
+    if(d == 0) { 
+		for(int i = 0; i < 9; i++)
+		{
+			result[i] = mat[i];
+		}
+        return; 
+    } 
+	
+    result[0] = (mat[4] * mat[8] - mat[5] * mat[7]) / d; 
+    result[1] = -(mat[1] * mat[8] - mat[2] * mat[7]) / d; 
+    result[2] = (mat[1] * mat[5] - mat[2] * mat[4]) / d; 
+    result[3] = -(mat[3] * mat[8] - mat[5] * mat[6]) / d; 
+    result[4] = (mat[0] * mat[8] - mat[2] * mat[6]) / d; 
+    result[5] = -(mat[0] * mat[5] - mat[2] * mat[3]) / d; 
+    result[6] = (mat[3] * mat[7] - mat[4] * mat[6]) / d; 
+    result[7] = -(mat[0] * mat[7] - mat[1] * mat[6]) / d; 
+    result[8] = (mat[0] * mat[4] - mat[1] * mat[3]) / d; 
+
+	return;
+}
+
+__DEVICE__ float3 rgb_to_hsl(float3 rgb)
+{
+	//float3 hsl;
+	float lxy_matrix[9];
+	lxy_matrix[0] = 1.0f/3.0f; lxy_matrix[1] = 1.0f/3.0f; lxy_matrix[2] = 1.0f/3.0f; 
+	lxy_matrix[3] = -0.5f; lxy_matrix[4] = -0.5f; lxy_matrix[5] = 1.0f; 
+	lxy_matrix[6] = _sqrtf(3.0f)/2.0f; lxy_matrix[7] = -_sqrtf(3.0f)/2.0f; lxy_matrix[8] = 0.0f; 
+
+	//Apply matrix into Lxy space
+	float3 lxy = apply_3x3_matrix(rgb, lxy_matrix);
+	//return lxy;
+
+	//Convert x and y to H and S polar coords
+	float hue = better_atan(lxy.y, lxy.z);/// 3.14159f;
+	float sat = _hypotf(lxy.y, lxy.z);
+
+	float3 hsl = make_float3(hue, sat, lxy.x);
+	return hsl;
+}
+
+__DEVICE__ float3 hsl_to_rgb(float3 hsl)
+{
+	//convert polar to lxy
+	float3 lxy = make_float3(
+		hsl.z, 
+		hsl.y *_sinf( (hsl.x) ),
+		hsl.y *_cosf( (hsl.x) )
+		);
+
+	//float3 hsl;
+	float lxy_matrix[9];
+	lxy_matrix[0] = 1.0f/3.0f; lxy_matrix[1] = 1.0f/3.0f; lxy_matrix[2] = 1.0f/3.0f; 
+	lxy_matrix[3] = -0.5f; lxy_matrix[4] = -0.5f; lxy_matrix[5] = 1.0f; 
+	lxy_matrix[6] = _sqrtf(3.0f)/2.0f; lxy_matrix[7] = -_sqrtf(3.0f)/2.0f; lxy_matrix[8] = 0.0f; 
+
+	//Apply inv matrix out of Lxy space
+	float inv_lxy_matrix[9];
+	invert_3x3_matrix(lxy_matrix, inv_lxy_matrix);
+	float3 rgb = apply_3x3_matrix( lxy, inv_lxy_matrix );
+
+	return rgb;
+}
+
+__DEVICE__ float3 apply_hsl_offsets(float3 rgb, float hue, float sat, float lum)
+{
+	float3 hsl = rgb_to_hsl(rgb);
+	hsl.x = hsl.x + hue;
+	hsl.y = hsl.y + sat;
+	hsl.z = hsl.z + lum;
+	return hsl_to_rgb(hsl);
+}
+
+__DEVICE__ float3 tetra(float3 triplet, float3 corners[6])
+{
+	float r = triplet.x;
+	float g = triplet.y;		
+	float b = triplet.z;		
+		
+	float3 wht = make_float3(1, 1, 1);	
+	float3 red = corners[0];		
+	float3 yel = corners[1];
+	float3 grn = corners[2];
+	float3 cyn = corners[3];
+	float3 blu = corners[4];
+	float3 mag = corners[5];
+
+	if(r>g){
+		//r>g>b
+		if(g>b){
+			return r*red + g*(yel-red) + b*(wht-yel);
+		}
+		//r>b>g
+		else if(r>b){
+			return r*red + g*(wht-mag) + b*(mag-red);
+		}
+		//b>r>g
+		else{
+			return r*(mag-blu) + g*(wht-mag) + b*blu;
+		} 
+	}
+	else{
+		//b>g>r
+		if(b>g){
+			return r*(wht-cyn) + g*(cyn-blu) + b*blu;
+		}
+		//g>b>r
+		else if(b>r){
+			return r*(wht-cyn) + g*grn + b*(cyn-grn);
+		}
+		//g>r>b
+		else{
+			return r*(yel-grn) + g*grn + b*(wht-yel);
+		}
+	}
+}
+
+__DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p_R, float p_G, float p_B)
+{	
+	float3 rgb = make_float3(p_R, p_G, p_B);
+	float3 hsl = rgb_to_hsl(rgb);
+	float3 mod_hsl = make_float3(hsl.x + redH , hsl.y * redS, hsl.z + redL );
+
+	float3 corners[6];
+	corners[0] = apply_hsl_offsets( make_float3(1.0f, 0.0f, 0.0f), redH, redS, redL);
+	corners[1] = apply_hsl_offsets( make_float3(1.0f, 1.0f, 0.0f), yelH, yelS, yelL);
+	corners[2] = apply_hsl_offsets( make_float3(0.0f, 1.0f, 0.0f), grnH, grnS, grnL);
+	corners[3] = apply_hsl_offsets( make_float3(0.0f, 1.0f, 1.0f), cynH, cynS, cynL);
+	corners[4] = apply_hsl_offsets( make_float3(0.0f, 0.0f, 1.0f), bluH, bluS, bluL);
+	corners[5] = apply_hsl_offsets( make_float3(1.0f, 0.0f, 1.0f), magH, magS, magL);
+	
+	float3 output = tetra(rgb, corners);
+
+	return output;
+}
