@@ -1,0 +1,164 @@
+/* 
+ * Hue vs Vibrance
+ * Copyright (C) 2024 - Chromanista
+ * Version - 0.2 - 2024-10-04
+*/
+
+DEFINE_UI_PARAMS(P1, Red Vibrance, DCTLUI_SLIDER_FLOAT, 0.0, -1.0, 1.0, 0.1)
+DEFINE_UI_PARAMS(P2, Yellow Vibrance, DCTLUI_SLIDER_FLOAT, 0.0, -1.0, 1.0, 0.1)
+DEFINE_UI_PARAMS(P3, Green Vibrance, DCTLUI_SLIDER_FLOAT, 0.0, -1.0, 1.0, 0.1)
+DEFINE_UI_PARAMS(P4, Cyan Vibrance, DCTLUI_SLIDER_FLOAT, 0.0, -1.0, 1.0, 0.1)
+DEFINE_UI_PARAMS(P5, Blue Vibrance, DCTLUI_SLIDER_FLOAT, 0.0, -1.0, 1.0, 0.1)
+DEFINE_UI_PARAMS(P6, Magenta Vibrance, DCTLUI_SLIDER_FLOAT, 0.0, -1.0, 1.0, 0.1)
+
+__DEVICE__ float better_atan(float x, float y)
+{
+	return _atan2f( y, -x );
+}
+
+__DEVICE__ float det3x3(float mat[9])
+{
+	return mat[0] * ( mat[4] * mat[8] - mat[5] * mat[7] ) 
+		- mat[1] * ( mat[3] * mat[8] - mat[5] * mat[6] )
+		+ - mat[2] * ( mat[3] * mat[7] - mat[4] * mat[6] );
+}
+
+__DEVICE__ float3 apply_3x3_matrix(float3 triplet, float matrix[9])
+{
+	float3 result;
+	result.x = matrix[0] * triplet.x + matrix[1] * triplet.y + matrix[2] * triplet.z;
+	result.y = matrix[3] * triplet.x + matrix[4] * triplet.y + matrix[5] * triplet.z;
+	result.z = matrix[6] * triplet.x + matrix[7] * triplet.y + matrix[8] * triplet.z;
+	return result;
+}
+
+__DEVICE__ void invert_3x3_matrix( float mat[9], float result[9])
+{	
+	float d = det3x3(mat) * 3.0f; 
+    if(d == 0) { 
+		for(int i = 0; i < 9; i++)
+		{
+			result[i] = mat[i];
+		}
+        return; 
+    } 
+	
+    result[0] = (mat[4] * mat[8] - mat[5] * mat[7]) / d; 
+    result[1] = -(mat[1] * mat[8] - mat[2] * mat[7]) / d; 
+    result[2] = (mat[1] * mat[5] - mat[2] * mat[4]) / d; 
+    result[3] = -(mat[3] * mat[8] - mat[5] * mat[6]) / d; 
+    result[4] = (mat[0] * mat[8] - mat[2] * mat[6]) / d; 
+    result[5] = -(mat[0] * mat[5] - mat[2] * mat[3]) / d; 
+    result[6] = (mat[3] * mat[7] - mat[4] * mat[6]) / d; 
+    result[7] = -(mat[0] * mat[7] - mat[1] * mat[6]) / d; 
+    result[8] = (mat[0] * mat[4] - mat[1] * mat[3]) / d; 
+
+	return;
+}
+
+__DEVICE__ float3 rgb_to_hsl(float3 rgb)
+{
+	rgb = make_float3(rgb.z, rgb.y, rgb.x);
+    //float3 hsl;
+	float lxy_matrix[9];
+	lxy_matrix[0] = 1.0f/3.0f; lxy_matrix[1] = 1.0f/3.0f; lxy_matrix[2] = 1.0f/3.0f; 
+	lxy_matrix[3] = -0.5f; lxy_matrix[4] = -0.5f; lxy_matrix[5] = 1.0f; 
+	lxy_matrix[6] = _sqrtf(3.0f)/2.0f; lxy_matrix[7] = -_sqrtf(3.0f)/2.0f; lxy_matrix[8] = 0.0f; 
+
+	//Apply matrix into Lxy space
+	float3 lxy = apply_3x3_matrix(rgb, lxy_matrix);
+    lxy = make_float3(lxy.x, lxy.z, lxy.y);
+	//return lxy;
+
+	//Convert x and y to H and S polar coords
+	float hue = better_atan(lxy.z, lxy.y);/// 3.14159f;
+	float sat = _hypotf(lxy.y, lxy.z);
+
+    hue = hue/(2.0f * 3.1415926535f) + 0.5f;
+
+	float3 hsl = make_float3(hue, sat, lxy.x);
+	return hsl;
+}
+
+__DEVICE__ float3 hsl_to_rgb(float3 hsl)
+{
+	hsl.x = (hsl.x - 0.5f)*(2.0f * 3.1415926535f);
+	//convert polar to lxy
+	float3 lxy = make_float3(
+		hsl.z, 
+		hsl.y *_sinf( (hsl.x+3.14159265f/6.0f) ),
+		hsl.y *_cosf( (hsl.x+3.14159265f/6.0f) )
+        //hsl.y *_cosf( (hsl.x) ),
+		//hsl.y *_sinf( (hsl.x) )
+		);
+	//return lxy;
+
+	//float3 hsl;
+	float lxy_matrix[9];
+	lxy_matrix[0] = 1.0f/3.0f;          lxy_matrix[1] = 1.0f/3.0f;          lxy_matrix[2] = 1.0f/3.0f; 
+	lxy_matrix[3] = -0.5f;              lxy_matrix[4] = -0.5f;              lxy_matrix[5] = 1.0f; 
+	lxy_matrix[6] = _sqrtf(3.0f)/2.0f;  lxy_matrix[7] = -_sqrtf(3.0f)/2.0f; lxy_matrix[8] = 0.0f; 
+
+	//Apply inv matrix out of Lxy space
+	float inv_lxy_matrix[9];
+	invert_3x3_matrix(lxy_matrix, inv_lxy_matrix);
+	float3 rgb = apply_3x3_matrix( lxy, inv_lxy_matrix );
+	//float3 rgb = apply_3x3_matrix(lxy, lxy_matrix );
+    rgb = make_float3(rgb.y, rgb.x, rgb.z); //Swap R and G because I don't understand trig
+	return rgb;
+}
+
+__DEVICE__ float spline_interp(float P1, float P2, float P3, float P4, float point) 
+{
+    //Assumes the following x coords: 
+    //P1 - -1.0
+    //P2 - 0.0
+    //P3 - 1.0
+    //P4 - 2.0
+    //...and P2 <= point <=P3
+    float p_interp = 0.5f * ( (2.0f * P2) + (-1.0f * P1 + P3) * point + (2.0f * P1 - 5.0f * P2 + 4.0f * P3 - P4) * point * point + ( -1.0f * P1 + 3.0f * P2 - 3.0f * P3 + P4) * point * point * point );
+    return p_interp;
+}
+
+__DEVICE__ float vibrance( float satch_value, float vibrance_val)
+{
+    return _powf(satch_value, 1.0f - vibrance_val);
+}
+
+__DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p_R, float p_G, float p_B)
+{
+    float3 hsl = rgb_to_hsl( make_float3(p_R, p_G, p_B) );
+    //hsl.x = hsl.x/(-2.0f * 3.1415926535f) + 0.5f;
+    float hue = hsl.x * 6.0f;
+    
+    if(hue >= 0.0f && hue <= 1.0f)
+    {
+        hsl.y = vibrance(hsl.y, spline_interp(P6, P1, P2, P3, hue));
+    }
+    else if(hue > 1.0f && hue <= 2.0f)
+    {
+        hsl.y = vibrance(hsl.y, spline_interp(P1, P2, P3, P4, hue - 1.0f));
+    }
+    else if(hue > 2.0f && hue <= 3.0f)
+    {
+        hsl.y = vibrance(hsl.y, spline_interp(P2, P3, P4, P5, hue - 2.0f));
+    }
+    else if(hue > 3.0f && hue <= 4.0f)
+    {
+        hsl.y = vibrance(hsl.y, spline_interp(P3, P4, P5, P6, hue - 3.0f));
+    }
+    else if(hue > 4.0f && hue <= 5.0f)
+    {
+        hsl.y = vibrance(hsl.y, spline_interp(P4, P5, P6, P1, hue - 4.0f));
+    }
+    else if(hue > 5.0f && hue <= 6.0f)
+    {
+        hsl.y = vibrance(hsl.y, spline_interp(P5, P6, P1, P2, hue - 5.0f));
+    }
+    
+    //p_R = p_R * 2.0f;
+    //hsl.x = (hsl.x - 0.5f)*(2.0f * 3.1415926535f);
+    float3 modified_rgb = hsl_to_rgb(hsl);
+    //float3 modified_rgb = hsl;
+    return modified_rgb;
+}
